@@ -23,6 +23,16 @@
 - src/ 코드에 DB 호스트, 계정, 비밀번호를 직접 작성
 - `.env` 파일을 git에 커밋 (`.gitignore`로 제외됨)
 
+## [최우선 규칙] DB 불변 원칙
+
+> **DB(PostgreSQL/PostGIS)의 테이블, 함수, 스키마는 절대 수정하지 않는다.**
+
+- DB 함수에서 에러가 발생하면 → **플러그인 코드에서 우회 처리**
+- 예: DB 함수가 GeometryCollection 반환 → 플러그인에서 원본 테이블 직접 공간 쿼리
+- 예: DB 함수에 PK가 없음 → 플러그인 URI에서 rid 지정 또는 자동 감지
+- DB에 ALTER, CREATE, DROP 등 DDL 실행 금지
+- 모든 데이터 처리/변환은 플러그인(Python/QGIS API) 레벨에서 수행
+
 ---
 
 ## 프로젝트 개요

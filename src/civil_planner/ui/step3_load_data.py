@@ -14,9 +14,9 @@ from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer
 from .styles import CARD_STYLE, PRIMARY_BUTTON_STYLE
 from ..core.layer_loader import (
     AVAILABLE_LAYERS, LayerLoaderThread, transform_extent_to_db,
-    detect_sigungu_code, detect_region_code,
+    detect_emd_codes, detect_sigungu_code, detect_region_code,
 )
-from ..core.preprocessor import PreprocessTask
+from ..core.preprocessor import BatchPreprocessTask
 from ..core.style_manager import StyleManager
 
 
@@ -30,7 +30,8 @@ class Step3LoadData(QWidget):
         self.loader_thread = None
         self.style_manager = StyleManager()
         self._loaded_raw_layers = []
-        self._pending_tasks = 0
+        self._pending_layers = []  # (layer, name) 전처리 대기 목록
+        self._batch_task = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -208,10 +209,18 @@ class Step3LoadData(QWidget):
         extent = boundary.extent()
         extent_5179 = transform_extent_to_db(extent, project_crs)
 
-        # 메인 스레드에서 행정구역 코드 감지 (스레드 안전)
+        # 메인 스레드에서 행정구역 코드 감지 (읍면동 단위 → 빠른 데이터 로드)
         self.status_label.setText("행정구역 자동 감지 중...")
-        region_code = detect_sigungu_code(extent_5179) or detect_region_code(extent_5179)
-        if region_code is None:
+
+        # 1순위: 읍면동(8자리+) → 소량 데이터, 빠름
+        region_codes = detect_emd_codes(extent_5179)
+        if not region_codes:
+            # 2순위: 시군구(5자리) 폴백
+            code = detect_sigungu_code(extent_5179) or detect_region_code(extent_5179)
+            if code:
+                region_codes = [code]
+
+        if not region_codes:
             QMessageBox.warning(
                 self, "알림",
                 "범위에 해당하는 행정구역을 찾을 수 없습니다.\nDB 연결을 확인해주세요.",
@@ -219,16 +228,17 @@ class Step3LoadData(QWidget):
             return
 
         self.boundary_info.setText(
-            self.boundary_info.text() + f"\n감지된 행정구역 코드: {region_code}"
+            self.boundary_info.text() +
+            f"\n감지된 읍면동: {len(region_codes)}개 ({', '.join(region_codes[:5])}{'...' if len(region_codes) > 5 else ''})"
         )
 
         self.btn_load.setEnabled(False)
         self.progress_frame.setVisible(True)
         self._loaded_raw_layers = []
-        self._pending_tasks = 0
+        self._pending_layers = []
 
         self._cleanup_thread()
-        self.loader_thread = LayerLoaderThread(selected, region_code)
+        self.loader_thread = LayerLoaderThread(selected, region_codes, extent_5179)
         self.loader_thread.progress_changed.connect(self._on_progress)
         self.loader_thread.uri_ready.connect(self._on_uri_ready)
         self.loader_thread.error_occurred.connect(self._on_error)
@@ -246,8 +256,7 @@ class Step3LoadData(QWidget):
         self.progress_label.setText(msg)
 
     def _on_uri_ready(self, uri_str, name, layer_type, provider):
-        """URI 수신 → 메인 스레드에서 레이어 생성 → QgsTask로 비동기 전처리"""
-        # 취소된 스레드의 잔여 시그널 무시
+        """URI 수신 → 메인 스레드에서 레이어 생성 → 목록에 수집"""
         if self.loader_thread and self.loader_thread._is_cancelled:
             return
 
@@ -261,65 +270,65 @@ class Step3LoadData(QWidget):
             self.status_label.setStyleSheet("font-size: 13px; color: #ef4444; padding: 4px;")
             return
 
-        boundary = self.shared_data.get("boundary_layer")
-        if boundary is None or not boundary.isValid():
-            # 범위 레이어가 삭제된 경우 원본 그대로 추가
-            QgsProject.instance().addMapLayer(layer)
-            self._loaded_raw_layers.append(layer)
-            return
-
-        # QgsTask로 비동기 전처리 (UI 프리징 방지)
-        self._pending_tasks += 1
-        task = PreprocessTask(
-            layer, boundary, name,
-            style_callback=self._apply_style_callback,
-        )
-        task.taskCompleted.connect(lambda: self._on_task_finished(task, name, True))
-        task.taskTerminated.connect(lambda: self._on_task_finished(task, name, False))
-
-        from qgis.core import QgsApplication
-        QgsApplication.taskManager().addTask(task)
-        self.status_label.setText(f"전처리 중: {name}")
+        # 전처리 대기 목록에 추가
+        self._pending_layers.append((layer, name))
+        self.status_label.setText(f"로드 완료: {name} ({len(self._pending_layers)}개)")
 
     def _apply_style_callback(self, layer, name):
-        """PreprocessTask.finished()에서 호출되는 스타일 콜백"""
+        """BatchPreprocessTask.finished()에서 호출되는 스타일 콜백"""
         self.style_manager.apply_style_to_layer(layer, name)
-
-    def _on_task_finished(self, task, name, success):
-        """PreprocessTask 완료 시 호출"""
-        self._pending_tasks -= 1
-        if success and task.result_layer:
-            self._loaded_raw_layers.append(task.result_layer)
-            self.status_label.setText(f"전처리 완료: {name}")
-            self.status_label.setStyleSheet("font-size: 13px; color: #059669; padding: 4px;")
-        else:
-            self.status_label.setText(f"전처리 실패: {name}")
-            self.status_label.setStyleSheet("font-size: 13px; color: #ef4444; padding: 4px;")
-
-        # 모든 태스크 완료 시
-        if self._pending_tasks <= 0:
-            self.shared_data["loaded_layers"] = self._loaded_raw_layers
-            count = len(self._loaded_raw_layers)
-            self.status_label.setText(f"전체 완료: {count}개 레이어 로드 및 전처리됨")
-            self.status_label.setStyleSheet(
-                "font-size: 13px; color: #059669; padding: 4px; font-weight: 600;"
-            )
-            self.iface.mapCanvas().refresh()
 
     def _on_error(self, msg):
         self.status_label.setText(f"오류: {msg}")
         self.status_label.setStyleSheet("font-size: 13px; color: #ef4444; padding: 4px;")
 
     def _on_all_completed(self):
-        """URI 준비 스레드 완료 (전처리 태스크는 아직 실행 중일 수 있음)"""
-        self.btn_load.setEnabled(True)
+        """URI 준비 스레드 완료 → 수집된 레이어를 일괄 전처리 (순차, 크래시 방지)"""
         self.progress_frame.setVisible(False)
-        if self._pending_tasks > 0:
-            self.status_label.setText(f"전처리 진행 중... ({self._pending_tasks}개 남음)")
-        else:
+
+        if not self._pending_layers:
+            self.btn_load.setEnabled(True)
+            self.status_label.setText("로드된 레이어가 없습니다.")
+            return
+
+        boundary = self.shared_data.get("boundary_layer")
+        if boundary is None or not boundary.isValid():
+            # 범위 없으면 원본 그대로 추가
+            for layer, name in self._pending_layers:
+                QgsProject.instance().addMapLayer(layer)
+                self._loaded_raw_layers.append(layer)
             self.shared_data["loaded_layers"] = self._loaded_raw_layers
-            count = len(self._loaded_raw_layers)
-            self.status_label.setText(f"전체 완료: {count}개 레이어")
+            self.btn_load.setEnabled(True)
+            return
+
+        # 단일 QgsTask에서 순차 전처리 (동시 실행 크래시 방지)
+        self.status_label.setText(
+            f"전처리 시작: {len(self._pending_layers)}개 레이어..."
+        )
+
+        from qgis.core import QgsApplication
+        self._batch_task = BatchPreprocessTask(
+            self._pending_layers, boundary,
+            style_callback=self._apply_style_callback,
+        )
+        self._batch_task.taskCompleted.connect(self._on_batch_finished)
+        self._batch_task.taskTerminated.connect(self._on_batch_finished)
+        QgsApplication.taskManager().addTask(self._batch_task)
+
+    def _on_batch_finished(self):
+        """일괄 전처리 태스크 완료"""
+        self.btn_load.setEnabled(True)
+        if hasattr(self, '_batch_task') and self._batch_task:
+            for layer, name, success in self._batch_task.results:
+                self._loaded_raw_layers.append(layer)
+
+        self.shared_data["loaded_layers"] = self._loaded_raw_layers
+        count = len(self._loaded_raw_layers)
+        self.status_label.setText(f"전체 완료: {count}개 레이어 로드 및 전처리됨")
+        self.status_label.setStyleSheet(
+            "font-size: 13px; color: #059669; padding: 4px; font-weight: 600;"
+        )
+        self.iface.mapCanvas().refresh()
 
     def execute_step(self):
         if not self.shared_data.get("loaded_layers"):

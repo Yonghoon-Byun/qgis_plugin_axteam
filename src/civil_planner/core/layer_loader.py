@@ -37,7 +37,14 @@ AVAILABLE_LAYERS = [
     {"name": "도로경계선", "function_name": "road_outline_clip", "geom_column": "geom", "layer_type": "vector"},
     {"name": "도로중심선", "function_name": "road_center_clip", "geom_column": "geom", "layer_type": "vector"},
     {"name": "등고선", "function_name": "contour_clip", "geom_column": "geom", "layer_type": "vector"},
-    {"name": "연속지적도", "function_name": "cadastral_filtered", "geom_column": "geom", "layer_type": "vector"},
+    {
+        "name": "연속지적도",
+        "function_name": "lsmd_cont_ldreg",
+        "geom_column": "geom",
+        "layer_type": "vector",
+        "query_type": "spatial",  # 테이블 직접 공간쿼리
+        "pk_column": "ufid",
+    },
     {"name": "터널", "function_name": "tunnel_clip", "geom_column": "geom", "layer_type": "vector"},
     {"name": "토지소유정보", "function_name": "land_owner_info", "geom_column": "geom", "layer_type": "vector"},
     {"name": "하천경계", "function_name": "river_boundary_clip", "geom_column": "geom", "layer_type": "vector"},
@@ -103,8 +110,42 @@ def detect_region_code(extent_5179):
     return None
 
 
+def detect_emd_codes(extent_5179):
+    """범위와 겹치는 읍면동(8자리+) 코드를 모두 감지
+
+    가장 세밀한 단위로 감지하여 DB 함수 호출 시 소량 데이터만 반환되도록 합니다.
+    메인 스레드에서 호출해야 합니다.
+
+    Args:
+        extent_5179: QgsRectangle (EPSG:5179)
+
+    Returns:
+        list[str]: 읍면동 코드 리스트 (예: ["31240101", "31240102"]) 또는 빈 리스트
+    """
+    xmin = extent_5179.xMinimum()
+    ymin = extent_5179.yMinimum()
+    xmax = extent_5179.xMaximum()
+    ymax = extent_5179.yMaximum()
+
+    sql_filter = (
+        f"ST_Intersects(geometry, "
+        f"ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax}, {DB_SRID})) "
+        f"AND LENGTH(adm_cd) >= 8"
+    )
+
+    uri = QgsDataSourceUri()
+    uri.setConnection(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+    uri.setDataSource(DB_SCHEMA, "sgis_hjd", "geometry", sql_filter, "adm_cd")
+
+    layer = QgsVectorLayer(uri.uri(), "_emd_detect", "postgres")
+    if not layer.isValid() or layer.featureCount() <= 0:
+        return []
+
+    return [feat["adm_cd"] for feat in layer.getFeatures()]
+
+
 def detect_sigungu_code(extent_5179):
-    """범위와 겹치는 시군구(5자리) 코드를 감지 (더 정확한 필터링용)
+    """범위와 겹치는 시군구(5자리) 코드를 감지 (폴백용)
     메인 스레드에서 호출해야 합니다.
     """
     xmin = extent_5179.xMinimum()
@@ -126,21 +167,20 @@ def detect_sigungu_code(extent_5179):
     if not layer.isValid() or layer.featureCount() <= 0:
         return None
 
-    # 시군구가 1개면 그 코드 사용 (더 정확), 여러 개면 시도 코드 사용
     codes = [feat["adm_cd"] for feat in layer.getFeatures()]
     if len(codes) == 1:
         return codes[0]
-    # 여러 시군구에 걸치면 공통 시도 코드 반환
     return codes[0][:2]
 
 
-def build_function_uri(function_name, region_code, layer_info=None):
+def build_function_uri(function_name, region_code, layer_info=None, extent_5179=None):
     """DB 함수 또는 테이블 기반 레이어 URI 생성
 
     Args:
         function_name: DB 함수 이름 또는 테이블 이름
         region_code: 행정구역 코드 (자동 감지된 값)
         layer_info: 레이어 추가 정보 (query_type, pk_column 등)
+        extent_5179: QgsRectangle (EPSG:5179 기준 bbox, 공간 필터용)
 
     Returns:
         QgsDataSourceUri
@@ -158,14 +198,33 @@ def build_function_uri(function_name, region_code, layer_info=None):
     query_type = layer_info.get("query_type", "function") if layer_info else "function"
     pk_col = layer_info.get("pk_column", "") if layer_info else ""
 
-    if query_type == "table":
+    if query_type == "spatial":
+        # 테이블 직접 공간쿼리 (bbox 기반)
+        if extent_5179 is not None:
+            xmin = extent_5179.xMinimum()
+            ymin = extent_5179.yMinimum()
+            xmax = extent_5179.xMaximum()
+            ymax = extent_5179.yMaximum()
+            sql_filter = (
+                f"ST_Intersects({geom_col}, "
+                f"ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax}, {DB_SRID}))"
+            )
+        else:
+            sql_filter = (
+                f"ST_Intersects({geom_col}, "
+                f"(SELECT geometry FROM {DB_SCHEMA}.sgis_hjd "
+                f"WHERE adm_cd = '{region_code}' LIMIT 1))"
+            )
+        uri.setDataSource(DB_SCHEMA, function_name, geom_col, sql_filter, pk_col)
+    elif query_type == "table":
         # 테이블 직접 조회 + region_code 필터
         sql_filter = f"adm_cd LIKE '{region_code}%'"
         uri.setDataSource(DB_SCHEMA, function_name, geom_col, sql_filter, pk_col)
     else:
-        # 기존 DB 함수 서브쿼리 방식 (PK 자동 감지)
+        # DB 함수 서브쿼리 방식 (gis_layer_loader와 동일)
+        # 필터 없이 로드 → PreprocessTask에서 클리핑
         table = f"(SELECT * FROM {DB_SCHEMA}.{function_name}('{region_code}'))"
-        uri.setDataSource("", table, geom_col, "", pk_col)
+        uri.setDataSource("", table, geom_col, "", pk_col or "rid")
 
     return uri
 
@@ -187,10 +246,17 @@ class LayerLoaderThread(QThread):
     error_occurred = pyqtSignal(str)
     all_completed = pyqtSignal()
 
-    def __init__(self, layers_to_load, region_code, parent=None):
+    def __init__(self, layers_to_load, region_codes, extent_5179=None, parent=None):
+        """
+        Args:
+            layers_to_load: AVAILABLE_LAYERS 중 선택된 항목 리스트
+            region_codes: 읍면동 코드 리스트 (예: ["31240101", "31240102"])
+            extent_5179: QgsRectangle (EPSG:5179, spatial 쿼리용)
+        """
         super().__init__(parent)
         self.layers_to_load = layers_to_load
-        self.region_code = region_code
+        self.region_codes = region_codes  # 여러 읍면동 코드
+        self.extent_5179 = extent_5179
         self._is_cancelled = False
 
     def cancel(self):
@@ -198,15 +264,14 @@ class LayerLoaderThread(QThread):
 
     def run(self):
         total = len(self.layers_to_load)
+        region_codes = self.region_codes
 
-        # region_code는 외부(메인 스레드)에서 이미 감지된 값을 사용
-        region_code = self.region_code
-        if not region_code:
+        if not region_codes:
             self.error_occurred.emit("범위에 해당하는 행정구역을 찾을 수 없습니다.")
             self.all_completed.emit()
             return
 
-        # 각 레이어의 URI 생성
+        # 각 레이어 × 각 읍면동 코드로 URI 생성
         for i, layer_info in enumerate(self.layers_to_load):
             if self._is_cancelled:
                 break
@@ -223,8 +288,13 @@ class LayerLoaderThread(QThread):
                     uri_str = self._build_raster_uri(func)
                     self.uri_ready.emit(uri_str, name, "raster", "gdal")
                 else:
-                    uri = build_function_uri(func, region_code, layer_info)
-                    self.uri_ready.emit(uri.uri(), name, "vector", "postgres")
+                    # 읍면동별로 호출 → 소량 데이터 × N회 (빠름)
+                    for code in region_codes:
+                        if self._is_cancelled:
+                            break
+                        uri = build_function_uri(func, code, layer_info, self.extent_5179)
+                        suffix = f"_{code}" if len(region_codes) > 1 else ""
+                        self.uri_ready.emit(uri.uri(), f"{name}{suffix}", "vector", "postgres")
             except Exception as e:
                 QgsMessageLog.logMessage(
                     f"LayerLoaderThread - {name}: {str(e)}",

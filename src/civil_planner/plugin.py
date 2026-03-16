@@ -51,10 +51,9 @@ class CivilPlanner:
             self.dialog = None
 
     def run(self):
-        # 매번 새 다이얼로그 생성 (이전 세션 상태 잔존 방지)
-        if self.dialog is not None:
-            self.dialog.close()
-        self.dialog = CivilPlannerWizard(self.iface)
+        # 다이얼로그 재사용 (작업 상태 유지)
+        if self.dialog is None:
+            self.dialog = CivilPlannerWizard(self.iface)
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()

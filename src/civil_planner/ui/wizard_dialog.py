@@ -6,7 +6,7 @@ QStackedWidget 기반 6단계 위자드
 
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QWidget, QFrame, QStackedWidget, QSizePolicy,
+    QWidget, QFrame, QStackedWidget, QSizePolicy, QMessageBox,
 )
 from qgis.PyQt.QtCore import Qt
 
@@ -155,6 +155,21 @@ class CivilPlannerWizard(QDialog):
         layout = QHBoxLayout()
         layout.setContentsMargins(20, 12, 20, 12)
 
+        # 초기화 버튼
+        self.btn_reset = QPushButton("초기화")
+        self.btn_reset.setFixedWidth(80)
+        self.btn_reset.setStyleSheet("""
+            QPushButton {
+                background-color: #fee2e2; border: 1px solid #fca5a5;
+                border-radius: 4px; color: #dc2626;
+                font-size: 13px; font-weight: 600; padding: 8px 12px;
+            }
+            QPushButton:hover { background-color: #fecaca; }
+        """)
+        self.btn_reset.setCursor(Qt.PointingHandCursor)
+        self.btn_reset.clicked.connect(self._reset_wizard)
+        layout.addWidget(self.btn_reset)
+
         # 이전 버튼
         self.btn_prev = QPushButton("이전")
         self.btn_prev.setFixedWidth(100)
@@ -242,3 +257,30 @@ class CivilPlannerWizard(QDialog):
         self.step_info_label.setText(
             f"{self.current_step + 1} / 6  {STEP_TITLES[self.current_step]}"
         )
+
+    def _reset_wizard(self):
+        """전체 위자드 초기화"""
+        reply = QMessageBox.question(
+            self, "초기화 확인",
+            "모든 작업 상태를 초기화하시겠습니까?\n"
+            "로드된 레이어와 설정이 모두 리셋됩니다.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # 상태 초기화
+        self.current_step = 0
+        self.completed_steps.clear()
+        self.shared_data["boundary_layer"] = None
+        self.shared_data["loaded_layers"] = []
+        self.shared_data["obstacle_layers"] = []
+        self.shared_data["route_layer"] = None
+
+        # 각 페이지 리셋 (reset 메서드가 있으면 호출)
+        for page in self.step_pages:
+            if hasattr(page, "reset"):
+                page.reset()
+
+        self._update_ui()

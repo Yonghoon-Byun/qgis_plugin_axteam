@@ -162,67 +162,75 @@ class Preprocessor:
         return clipped
 
 
-class PreprocessTask(QgsTask):
-    """QgsTask 기반 백그라운드 전처리 태스크
+class BatchPreprocessTask(QgsTask):
+    """QgsTask 기반 일괄 전처리 태스크
 
-    QGIS 내장 태스크 매니저에서 백그라운드로 실행되며,
-    processing.run() 호출로 인한 메인 스레드 블로킹을 방지합니다.
+    여러 레이어를 하나의 태스크에서 **순차적으로** 처리합니다.
+    processing.run()은 동시 실행 시 크래시하므로 반드시 순차 실행해야 합니다.
 
     사용 예:
-        task = PreprocessTask(input_layer, boundary_layer, "도로_전처리",
-                              style_callback=apply_style)
+        task = BatchPreprocessTask(layers_with_names, boundary_layer, style_callback)
         QgsApplication.taskManager().addTask(task)
     """
 
-    def __init__(self, input_layer, boundary_layer, layer_name, style_callback=None):
+    def __init__(self, layers_with_names, boundary_layer, style_callback=None):
         """
         Args:
-            input_layer: 입력 레이어 (벡터 또는 래스터)
+            layers_with_names: [(layer, name), ...] 전처리할 레이어 목록
             boundary_layer: 클리핑 범위 폴리곤 레이어
-            layer_name: 태스크 및 결과 레이어 표시 이름
             style_callback: 완료 후 스타일 적용 콜백 (layer, name) → None
-                            메인 스레드(finished)에서 호출됨
         """
-        super().__init__(f"전처리: {layer_name}", QgsTask.CanCancel)
-        self.input_layer = input_layer
+        super().__init__("전처리 일괄 처리", QgsTask.CanCancel)
+        self.layers_with_names = layers_with_names
         self.boundary_layer = boundary_layer
-        self.layer_name = layer_name
         self.style_callback = style_callback
-        self.result_layer = None
-        self.error_msg = None
+        self.results = []  # [(layer, name, success), ...]
 
     def run(self):
-        """백그라운드 스레드에서 실행 - processing.run() 안전"""
-        try:
+        """백그라운드 스레드에서 실행 - 순차적으로 processing.run() 호출"""
+        total = len(self.layers_with_names)
+
+        for i, (layer, name) in enumerate(self.layers_with_names):
+            if self.isCanceled():
+                return False
+
+            self.setProgress((i / total) * 100)
+
             QgsMessageLog.logMessage(
-                f"전처리 시작: {self.layer_name}",
+                f"전처리 중: {name} ({i + 1}/{total})",
                 LOG_TAG, Qgis.Info,
             )
-            self.result_layer = Preprocessor.preprocess_layer(
-                self.input_layer, self.boundary_layer
-            )
-            return self.result_layer is not None
-        except Exception as e:
-            self.error_msg = str(e)
-            QgsMessageLog.logMessage(
-                f"전처리 오류 ({self.layer_name}): {e}",
-                LOG_TAG, Qgis.Critical,
-            )
-            return False
+
+            try:
+                result = Preprocessor.preprocess_layer(layer, self.boundary_layer)
+                if result is not None:
+                    self.results.append((result, name, True))
+                else:
+                    # 전처리 실패 시 원본 유지
+                    self.results.append((layer, name, False))
+                    QgsMessageLog.logMessage(
+                        f"전처리 결과 없음 (원본 유지): {name}",
+                        LOG_TAG, Qgis.Warning,
+                    )
+            except Exception as e:
+                self.results.append((layer, name, False))
+                QgsMessageLog.logMessage(
+                    f"전처리 오류 ({name}): {e}",
+                    LOG_TAG, Qgis.Critical,
+                )
+
+        self.setProgress(100)
+        return True
 
     def finished(self, success):
-        """메인 스레드에서 호출 - 프로젝트에 레이어 추가"""
-        if success and self.result_layer is not None:
+        """메인 스레드에서 호출 - 프로젝트에 레이어 일괄 추가"""
+        for layer, name, preprocessed in self.results:
             if self.style_callback:
-                self.style_callback(self.result_layer, self.layer_name)
-            QgsProject.instance().addMapLayer(self.result_layer)
+                self.style_callback(layer, name)
+            QgsProject.instance().addMapLayer(layer)
+
+            status = "완료" if preprocessed else "원본"
             QgsMessageLog.logMessage(
-                f"전처리 완료: {self.layer_name}",
-                LOG_TAG, Qgis.Success,
-            )
-        else:
-            msg = self.error_msg or "결과 레이어 없음"
-            QgsMessageLog.logMessage(
-                f"전처리 실패 ({self.layer_name}): {msg}",
-                LOG_TAG, Qgis.Warning,
+                f"레이어 추가 ({status}): {name}",
+                LOG_TAG, Qgis.Success if preprocessed else Qgis.Warning,
             )
