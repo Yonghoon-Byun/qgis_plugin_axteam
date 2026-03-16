@@ -1,0 +1,20 @@
+{
+  "include": [
+    "."
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".git",
+    ".omc"
+  ],
+  "extraPaths": [
+    "C:/Program Files/QGIS 3.40.10/apps/qgis-ltr/python",
+    "C:/Program Files/QGIS 3.40.10/apps/qgis-ltr/python/plugins",
+    "C:/Program Files/QGIS 3.40.10/apps/Python312/Lib/site-packages"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Windows"
+}

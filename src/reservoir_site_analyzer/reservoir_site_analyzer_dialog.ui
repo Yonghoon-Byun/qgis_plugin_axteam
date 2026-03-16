@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ReservoirSiteAnalyzerDialog</class>
+ <widget class="QDialog" name="ReservoirSiteAnalyzerDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>500</width>
+    <height>480</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>배수지 적합 부지 분석</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="groupBoxRegion">
+     <property name="title">
+      <string>지역 선택</string>
+     </property>
+     <layout class="QFormLayout" name="formLayoutRegion">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelSido">
+        <property name="text">
+         <string>시/도:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="cmbSido">
+        <property name="toolTip">
+         <string>시/도를 선택하세요</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelSigungu">
+        <property name="text">
+         <string>시/군/구:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="cmbSigungu">
+        <property name="toolTip">
+         <string>시/군/구를 선택하세요</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="labelEupmyeondong">
+        <property name="text">
+         <string>읍/면/동:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="cmbEupmyeondong">
+        <property name="toolTip">
+         <string>읍/면/동을 선택하세요</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBoxTerrain">
+     <property name="title">
+      <string>지형 조건</string>
+     </property>
+     <layout class="QFormLayout" name="formLayoutTerrain">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelElevation">
+        <property name="text">
+         <string>최소 고도 (m):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="spinElevation">
+        <property name="toolTip">
+         <string>이 고도 이상인 지역만 추출합니다</string>
+        </property>
+        <property name="suffix">
+         <string> m</string>
+        </property>
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>9999.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>60.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelSlope">
+        <property name="text">
+         <string>최대 경사 (도):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QDoubleSpinBox" name="spinSlope">
+        <property name="toolTip">
+         <string>이 경사 이하인 지역만 추출합니다</string>
+        </property>
+        <property name="suffix">
+         <string> °</string>
+        </property>
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>90.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>26.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBoxOwner">
+     <property name="title">
+      <string>소유주체 필터링</string>
+     </property>
+     <layout class="QFormLayout" name="formLayoutOwner">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelOwner">
+        <property name="text">
+         <string>소유주체:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="cmbOwner">
+        <property name="toolTip">
+         <string>필터링할 소유주체를 선택하세요</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBoxOutput">
+     <property name="title">
+      <string>출력 설정</string>
+     </property>
+     <layout class="QFormLayout" name="formLayoutOutput">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelOutputName">
+        <property name="text">
+         <string>출력 레이어 이름:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="txtOutputName">
+        <property name="text">
+         <string>적합부지_결과</string>
+        </property>
+        <property name="toolTip">
+         <string>생성될 임시 레이어의 이름</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QProgressBar" name="progressBar">
+     <property name="value">
+      <number>0</number>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="labelStatus">
+     <property name="text">
+      <string>준비됨</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>rejected()</signal>
+   <receiver>ReservoirSiteAnalyzerDialog</receiver>
+   <slot>reject()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>316</x>
+     <y>260</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>286</x>
+     <y>274</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

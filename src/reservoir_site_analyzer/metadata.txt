@@ -1,0 +1,33 @@
+[general]
+name=Reservoir Site Analyzer
+qgisMinimumVersion=3.0
+description=배수지(저수지) 설계를 위한 적합 부지 분석 플러그인. 고도, 경사, 소유주체 조건을 기반으로 적합 지역을 추출합니다.
+version=1.0.0
+author=도화엔지니어링 기술개발연구원
+email=suey@dohwa.co.kr
+
+about=이 플러그인은 배수지(저수지) 설계에 적합한 부지를 찾기 위한 도구입니다.
+
+    주요 기능:
+    - 3단계 계층형 행정구역 선택 (시도/시군구/읍면동)
+    - 고도 조건 필터링 (기본값: 60m 이상)
+    - 경사 조건 필터링 (지정 각도 이하)
+    - 소유주체별 필터링 (PostgreSQL DB 연동)
+    - DEM 래스터를 폴리곤으로 변환하여 결과 출력
+
+
+
+tags=dem, elevation, slope, reservoir, water tank, site analysis, korea, 배수지, 저수지, 부지분석
+
+category=Analysis
+icon=icon.png
+
+experimental=False
+deprecated=False
+
+changelog=
+    1.0.0 - 초기 릴리즈
+        - 계층형 행정구역 선택 기능
+        - 고도/경사 조건 필터링
+        - 소유주체 필터링
+        - DEM to Polygon 변환

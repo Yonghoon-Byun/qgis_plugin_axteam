@@ -1,0 +1,35 @@
+[general]
+name=Civil Planner
+qgisMinimumVersion=3.28
+description=토목 관로 설계 워크플로우 플러그인 (6단계 위자드)
+description[en]=Civil Engineering Pipeline Design Workflow Plugin (6-step Wizard)
+version=1.0.0
+author=도화엔지니어링 수자원환경연구소
+email=suey@dohwa.co.kr
+
+about=토목 관로 설계를 위한 6단계 워크플로우 플러그인입니다.
+    1단계: 프로젝트 CRS 설정 (EPSG:5186)
+    2단계: 작업 범위 폴리곤 생성
+    3단계: 현황 데이터 로드 및 전처리
+    4단계: 레이어 병합 및 스타일 정리
+    5단계: 지장물 데이터 연동
+    6단계: 계획 노선(관로) 그리기
+
+tracker=
+repository=https://github.com/Yonghoon-Byun/qgis_plugin_axteam
+hasProcessingProvider=no
+
+changelog=
+    1.0.0 - 초기 릴리즈
+        * 6단계 위자드 기반 관로 설계 워크플로우
+        * gis_layer_loader 레이어 연동
+        * 상하수도 스타일 라이브러리 자동 적용
+
+tags=civil engineering,pipeline,design,workflow,상하수도,관로,설계
+
+homepage=
+category=Plugins
+icon=icon.png
+experimental=False
+deprecated=False
+server=False

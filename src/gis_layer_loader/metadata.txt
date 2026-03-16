@@ -1,0 +1,19 @@
+[general]
+name=GIS Layer Loader
+qgisMinimumVersion=3.0
+description=Hierarchical region selector with WFS dynamic loading for GIS layers
+version=1.0
+author=도화엔지니어링 기술개발연구원
+email=suey@dohwa.co.kr
+
+about=This plugin provides a hierarchical region selection interface (sido/sigungu/emd) and dynamically loads WFS layers with viewparams based on selected administrative codes.
+
+tracker=
+repository=
+hasProcessingProvider=no
+tags=python,wfs,region,gis,layer
+homepage=
+category=Plugins
+icon=icon.png
+experimental=False
+deprecated=False

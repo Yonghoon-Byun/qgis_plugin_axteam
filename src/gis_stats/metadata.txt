@@ -1,0 +1,25 @@
+[general]
+name=GIS Stats Viewer
+qgisMinimumVersion=3.0
+description=행정구역별 경계에 통계정보(인구, 가구, 주택)를 조인하여 시각화하는 플러그인
+version=1.0.0
+author=기술개발연구원
+email=suey@dohwa.com
+about=행정구역(시도/시군구/읍면동) 경계에 통계정보를 자동으로 조인하고, 분위수(Quantile) 분류를 통해 색상으로 시각화합니다.
+
+tracker=https://github.com/gis-water/gis-stats-viewer/issues
+repository=https://github.com/gis-water/gis-stats-viewer
+
+hasProcessingProvider=no
+changelog=
+    1.0.0 - Initial release
+        * Region selection with display level
+        * Statistics join (population, household, housing)
+        * Quantile color mapping
+
+tags=statistics,administrative,visualization,korea,population
+
+category=Analysis
+icon=icon.png
+experimental=False
+deprecated=False

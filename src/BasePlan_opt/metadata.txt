@@ -1,0 +1,38 @@
+# This file contains metadata for your plugin.
+
+[general]
+name=BasePlan
+qgisMinimumVersion=3.34
+description=토목 기본도면 작성 플러그인
+description[en]=Civil Engineering Base Plan Plugin
+version=1.1.0
+author=Research Institute
+email=
+
+about=토목 기본도면(계획평면도, 노선도) 작성을 위한 배경도를 생성하는 QGIS 플러그인입니다. GeoServer WMS를 통해 PostgreSQL/PostGIS의 공간정보 데이터를 시각화합니다.
+about[en]=A QGIS plugin for creating background maps for civil engineering base plans (planning drawings, route maps). Visualizes spatial data from PostgreSQL/PostGIS through GeoServer WMS.
+
+tracker=
+repository=
+# End of mandatory metadata
+
+# Recommended items:
+hasProcessingProvider=no
+changelog=v1.1.0: MV+캐시 최적화, PostGIS 직연결 코드 제거
+    v1.0.0: BasePlan 초기 릴리스 - 토목 기본도면 작성 플러그인
+
+# Tags are comma separated with spaces allowed
+tags=wms,civil engineering,base plan,기본도면,토목,계획평면도
+
+homepage=
+category=Plugins
+icon=resources/icon.png
+experimental=False
+deprecated=False
+
+# Since QGIS 3.8, a comma separated list of plugins to be installed
+# (or upgraded) can be specified.
+# plugin_dependencies=
+
+# If the plugin can run on QGIS Server.
+server=False

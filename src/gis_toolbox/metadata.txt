@@ -1,0 +1,16 @@
+[general]
+name=GIS Toolbox
+qgisMinimumVersion=3.28
+description=GIS 유틸리티 모음 (좌표계 정의, 인코딩 변경, 레이어 저장, 도형 수정)
+version=1.0.0
+author=GIS Developer
+email=gis@example.com
+about=QGIS에서 자주 사용하는 유틸리티 4종을 모은 플러그인
+tracker=
+repository=
+tags=utility, crs, encoding, export, geometry
+homepage=
+category=Vector
+icon=icon.png
+experimental=False
+deprecated=False
