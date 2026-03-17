@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Step 3: 현황 데이터 로드 및 전처리
-2단계 범위 폴리곤의 extent → DB 공간 쿼리 → 클리핑 → 도형 수정
+Step 4: 현황 데이터 로드 및 전처리
+3단계 범위 폴리곤의 extent → DB 공간 쿼리 → 클리핑 → 도형 수정
 """
 
 from qgis.PyQt.QtWidgets import (
@@ -41,7 +41,7 @@ class Step3LoadData(QWidget):
 
         # 안내
         guide = QLabel(
-            "2단계에서 설정한 작업 범위를 기준으로\n"
+            "이전 단계에서 설정한 작업 범위를 기준으로\n"
             "DB에서 해당 영역의 현황 데이터를 자동으로 조회합니다."
         )
         guide.setStyleSheet("font-size: 14px; color: #6b7280;")
@@ -186,6 +186,12 @@ class Step3LoadData(QWidget):
             self.boundary_info.setStyleSheet(
                 "font-size: 13px; color: #059669; border: none; font-weight: 600;"
             )
+            # 사전 선택 지역 정보 추가 표시
+            region_name = self.shared_data.get("selected_region_name", "")
+            if region_name:
+                self.boundary_info.setText(
+                    self.boundary_info.text() + f"\n사전 선택 지역: {region_name}"
+                )
         else:
             self.boundary_info.setText("범위가 설정되지 않았습니다.")
             self.boundary_info.setStyleSheet(
@@ -196,7 +202,7 @@ class Step3LoadData(QWidget):
         """범위 기반 데이터 로드 시작"""
         boundary = self.shared_data.get("boundary_layer")
         if boundary is None:
-            QMessageBox.warning(self, "알림", "2단계에서 작업 범위를 먼저 설정해주세요.")
+            QMessageBox.warning(self, "알림", "범위 설정 단계에서 작업 범위를 먼저 설정해주세요.")
             return
 
         selected = [cb.layer_info for cb in self.layer_checkboxes if cb.isChecked()]
@@ -210,15 +216,18 @@ class Step3LoadData(QWidget):
         extent_5179 = transform_extent_to_db(extent, project_crs)
 
         # 메인 스레드에서 행정구역 코드 감지 (읍면동 단위 → 빠른 데이터 로드)
-        self.status_label.setText("행정구역 자동 감지 중...")
 
-        # 1순위: 읍면동(8자리+) → 소량 데이터, 빠름
-        region_codes = detect_emd_codes(extent_5179)
+        # 1순위: 사전 선택된 읍면동 코드 사용 (Step 2 사업지역 선택에서 선택)
+        region_codes = self.shared_data.get("selected_emd_codes", [])
+
         if not region_codes:
-            # 2순위: 시군구(5자리) 폴백
-            code = detect_sigungu_code(extent_5179) or detect_region_code(extent_5179)
-            if code:
-                region_codes = [code]
+            # 2순위: 기존 공간 쿼리 폴백 (사전 선택 없이 진행한 경우)
+            self.status_label.setText("행정구역 자동 감지 중...")
+            region_codes = detect_emd_codes(extent_5179)
+            if not region_codes:
+                code = detect_sigungu_code(extent_5179) or detect_region_code(extent_5179)
+                if code:
+                    region_codes = [code]
 
         if not region_codes:
             QMessageBox.warning(

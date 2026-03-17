@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Civil Planner - 메인 위자드 다이얼로그
-QStackedWidget 기반 6단계 위자드
+QStackedWidget 기반 7단계 위자드
 """
 
 from qgis.PyQt.QtWidgets import (
@@ -15,6 +15,7 @@ from .styles import (
     STEP_ACTIVE_STYLE, STEP_INACTIVE_STYLE, STEP_DONE_STYLE,
 )
 from .step1_setup import Step1Setup
+from .step2_region import Step2Region
 from .step2_boundary import Step2Boundary
 from .step3_load_data import Step3LoadData
 from .step4_organize import Step4Organize
@@ -24,6 +25,7 @@ from .step6_route import Step6Route
 
 STEP_TITLES = [
     "작업환경 설정",
+    "사업지역 선택",    # NEW
     "범위 설정",
     "데이터 로드",
     "정리 및 스타일",
@@ -33,7 +35,7 @@ STEP_TITLES = [
 
 
 class CivilPlannerWizard(QDialog):
-    """6단계 위자드 메인 다이얼로그"""
+    """7단계 위자드 메인 다이얼로그"""
 
     def __init__(self, iface, parent=None):
         super().__init__(parent)
@@ -43,10 +45,12 @@ class CivilPlannerWizard(QDialog):
 
         # 각 단계에서 공유하는 데이터
         self.shared_data = {
-            "boundary_layer": None,     # 2단계에서 생성된 범위 레이어
-            "loaded_layers": [],        # 3단계에서 로드된 레이어 목록
-            "obstacle_layers": [],      # 5단계에서 로드된 지장물 레이어 목록
-            "route_layer": None,        # 6단계에서 생성된 관로 레이어
+            "selected_emd_codes": [],       # 2단계 사업지역 선택
+            "selected_region_name": "",      # 2단계 선택된 지역명
+            "boundary_layer": None,          # 3단계에서 생성된 범위 레이어
+            "loaded_layers": [],             # 4단계에서 로드된 레이어 목록
+            "obstacle_layers": [],           # 6단계에서 로드된 지장물 레이어 목록
+            "route_layer": None,             # 7단계에서 생성된 관로 레이어
         }
 
         self.setWindowFlags(Qt.Window)
@@ -74,8 +78,9 @@ class CivilPlannerWizard(QDialog):
         self.stack = QStackedWidget()
         self.step_pages = [
             Step1Setup(self.iface, self.shared_data),
-            Step2Boundary(self.iface, self.shared_data),
-            Step3LoadData(self.iface, self.shared_data),
+            Step2Region(self.iface, self.shared_data),      # NEW - 사업지역 선택
+            Step2Boundary(self.iface, self.shared_data),     # 기존 (파일명 유지)
+            Step3LoadData(self.iface, self.shared_data),     # 기존 (파일명 유지)
             Step4Organize(self.iface, self.shared_data),
             Step5Obstacle(self.iface, self.shared_data),
             Step6Route(self.iface, self.shared_data),
@@ -255,7 +260,7 @@ class CivilPlannerWizard(QDialog):
             self.btn_next.setText("다음")
 
         self.step_info_label.setText(
-            f"{self.current_step + 1} / 6  {STEP_TITLES[self.current_step]}"
+            f"{self.current_step + 1} / {len(self.step_pages)}  {STEP_TITLES[self.current_step]}"
         )
 
     def _reset_wizard(self):
@@ -273,6 +278,8 @@ class CivilPlannerWizard(QDialog):
         # 상태 초기화
         self.current_step = 0
         self.completed_steps.clear()
+        self.shared_data["selected_emd_codes"] = []
+        self.shared_data["selected_region_name"] = ""
         self.shared_data["boundary_layer"] = None
         self.shared_data["loaded_layers"] = []
         self.shared_data["obstacle_layers"] = []
