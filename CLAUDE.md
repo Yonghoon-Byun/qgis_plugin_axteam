@@ -39,7 +39,7 @@
 
 - DB 함수에서 에러가 발생하면 → **플러그인 코드에서 우회 처리**
 - 예: `cadastral_filtered` 함수 GeometryCollection 에러 → `lsmd_cont_ldreg` 테이블 직접 공간 쿼리로 우회
-- 예: DB 함수에 PK가 없음 → 플러그인 URI에서 `rid` 지정
+- 예: DB 함수에 PK가 없음 → `ROW_NUMBER() OVER() AS _uid`로 순차 PK 생성
 - DB에 ALTER, CREATE, DROP 등 DDL 실행 금지
 - 모든 데이터 처리/변환은 플러그인(Python/QGIS API) 레벨에서 수행
 
@@ -57,6 +57,9 @@ qgis_plugin_axteam/
 ├── .env               # DB 접속 정보 (git 추적 제외)
 ├── .env.example       # .env 템플릿 (git 추적)
 ├── plugins/           # 배포용 zip 파일 (git 추적 제외)
+├── docs/              # 개발 문서
+│   ├── civil_planner_개발계획서.md
+│   └── civil_planner_개발계획서.pdf
 ├── src/               # 소스코드 작업 디렉토리 (git 추적)
 │   ├── shared/        # 플러그인 공통 모듈
 │   │   └── db_config.py   # .env 기반 DB 설정 로더
@@ -65,7 +68,7 @@ qgis_plugin_axteam/
 │   ├── gis_stats/
 │   ├── gis_toolbox/
 │   ├── reservoir_site_analyzer/
-│   └── civil_planner/    # 토목 관로 설계 위자드 (신규)
+│   └── civil_planner/    # 토목 관로 설계 7단계 위자드
 └── scripts/           # 관리 스크립트
     ├── pack_plugin.py
     └── deploy_plugin.py
@@ -80,33 +83,39 @@ qgis_plugin_axteam/
 | **gis_stats** | 1.0.0 | 행정구역별 통계(인구/가구/주택) 시각화 (Quantile 분류) |
 | **gis_toolbox** | 1.0.0 | GIS 유틸리티 모음 (좌표계/인코딩/레이어저장/지오메트리/레이어명) |
 | **reservoir_site_analyzer** | 1.0.0 | 저수지(배수지) 후보 부지 분석 (DEM/경사/관리주체) |
-| **civil_planner** | 1.0.0 | 토목 관로 설계 6단계 위자드 |
+| **civil_planner** | 1.0.6 | 토목 관로 설계 7단계 위자드 (UNION ALL 최적화) |
 
 ---
 
 ## civil_planner 상세
 
-### 6단계 위자드 워크플로우
+> 상세 개발계획서: `docs/civil_planner_개발계획서.md` 참조
+
+### 7단계 위자드 워크플로우
 
 ```
 [사전] Vworld 플러그인으로 배경지도 + 위치 이동 (별도 플러그인)
   ↓
 1단계: 프로젝트 CRS 설정 (EPSG:5186 권장, OTF로 DB 5179와 호환)
   ↓
-2단계: 작업 범위 폴리곤 생성 (지도 드래그 or 기존 레이어 선택)
+2단계: 사업지역 선택 (시도→시군구→읍면동 cascading, 지도 자동 zoom)
   ↓
-3단계: 범위 기반 DB 데이터 로드 + 전처리
+3단계: 작업 범위 폴리곤 생성 (지도 드래그 or 기존 레이어 선택)
+  ↓
+4단계: 범위 기반 DB 데이터 로드 + 전처리
   - 범위 좌표 → DB CRS(5179) 변환
   - sgis_hjd 공간 인덱스로 읍면동 코드 자동 감지 (밀리초)
-  - 읍면동별 DB 함수 호출 → 소량 데이터 로드 (빠름)
+  - UNION ALL 통합 쿼리 (함수당 1회, 약 40배 성능 개선)
+  - ROW_NUMBER() _uid로 PK 생성 (중복 방지)
   - BatchPreprocessTask로 순차 클리핑 + 도형수정 (크래시 방지)
+  - clip 전 공간 인덱스 생성 (10배 속도 개선)
   - 스타일 자동 적용 (00_상하수도 태그)
   ↓
-4단계: 레이어 그룹화 + 스타일 정리 + 배경 투명도
+5단계: 레이어 그룹화 + 스타일 정리 + 배경 투명도
   ↓
-5단계: 지장물 Shapefile 로드 + 전처리 (발주처 데이터)
+6단계: 지장물 파일/폴더 일괄 로드 (하위 디렉토리별 서브그룹 자동 생성)
   ↓
-6단계: 관로 LineString 레이어 생성 + 편집 모드 + 스냅 설정
+7단계: 관로 LineString 레이어 생성 + 편집 모드 + 스냅 설정
 ```
 
 ### 핵심 구조
@@ -115,38 +124,46 @@ qgis_plugin_axteam/
 src/civil_planner/
 ├── plugin.py                    # QGIS 진입점
 ├── db_env.py                    # .env 기반 DB 설정
-├── admin_regions.csv            # 행정구역 데이터
+├── admin_regions.csv            # 행정구역 코드 (시도/시군구/읍면동)
 ├── core/
-│   ├── layer_loader.py          # DB 레이어 로딩 (읍면동 감지 + 비동기 URI 준비)
+│   ├── layer_loader.py          # DB 레이어 로딩 (UNION ALL, 읍면동 감지)
 │   ├── preprocessor.py          # 클리핑 + 도형수정 (BatchPreprocessTask)
 │   └── style_manager.py         # XML 스타일 자동 적용
 ├── ui/
-│   ├── wizard_dialog.py         # 6단계 위자드 메인 (자유 이동 + 초기화)
-│   ├── step1_setup.py ~ step6_route.py
+│   ├── wizard_dialog.py         # 7단계 위자드 메인 (자유 이동 + 초기화)
+│   ├── step1_setup.py           # Step 1: CRS 설정
+│   ├── step2_region.py          # Step 2: 사업지역 선택 (cascading combobox)
+│   ├── step2_boundary.py        # Step 3: 범위 설정 (파일명 유지, 실제 Step 3)
+│   ├── step3_load_data.py       # Step 4: 데이터 로드
+│   ├── step4_organize.py        # Step 5: 정리 및 스타일
+│   ├── step5_obstacle.py        # Step 6: 지장물 연동
+│   ├── step6_route.py           # Step 7: 관로 설계
 │   └── styles.py                # 공통 UI 스타일시트
 └── styles/
     └── qgis_layer_style_library.xml  # 상하수도 스타일 23종
 ```
 
+> **주의**: Step 2 삽입 시 기존 파일명은 유지함 (step2_boundary.py → 실제 Step 3 등)
+
 ### DB 레이어 목록 (16개, 전수 검증 완료)
 
-**DB 함수 (13개)** — `SELECT * FROM public.함수명('읍면동코드')` 방식:
+**DB 함수 (13개)** — UNION ALL 통합 쿼리 + `ROW_NUMBER() OVER() AS _uid`:
 
 | 레이어명 | DB 함수 | PK | geom |
 |---------|--------|-----|------|
-| 건축물정보 | building_info_filter | rid | geom |
-| 단지경계 | complex_outline_clip | rid | geom |
-| 단지시설용지 | complex_facility_site_clip | rid | geom |
-| 단지용도지역 | complex_landuse_clip | rid | geom |
-| 단지유치업종 | complex_industry_clip | rid | geom |
-| 도로경계선 | road_outline_clip | rid | geom |
-| 도로중심선 | road_center_clip | rid | geom |
-| 등고선 | contour_clip | rid | geom |
-| 터널 | tunnel_clip | rid | geom |
-| 토지소유정보 | land_owner_info | rid | geom |
-| 하천경계 | river_boundary_clip | rid | geom |
-| 하천중심선 | river_centerline_clip | rid | geom |
-| 호수 및 저수지 | reservoir_clip | rid | geom |
+| 건축물정보 | building_info_filter | _uid | geom |
+| 단지경계 | complex_outline_clip | _uid | geom |
+| 단지시설용지 | complex_facility_site_clip | _uid | geom |
+| 단지용도지역 | complex_landuse_clip | _uid | geom |
+| 단지유치업종 | complex_industry_clip | _uid | geom |
+| 도로경계선 | road_outline_clip | _uid | geom |
+| 도로중심선 | road_center_clip | _uid | geom |
+| 등고선 | contour_clip | _uid | geom |
+| 터널 | tunnel_clip | _uid | geom |
+| 토지소유정보 | land_owner_info | _uid | geom |
+| 하천경계 | river_boundary_clip | _uid | geom |
+| 하천중심선 | river_centerline_clip | _uid | geom |
+| 호수 및 저수지 | reservoir_clip | _uid | geom |
 
 **테이블 직접 쿼리 (3개)** — DB 함수 우회:
 
@@ -170,10 +187,14 @@ src/civil_planner/
 |------|------|------|
 | CRS | 프로젝트 5186, DB 5179 (OTF) | DB 변환 리스크 방지 |
 | 행정구역 감지 | 읍면동(8자리+) 우선 | 시군구 전체 로드 시 느림 |
+| UNION ALL 통합 쿼리 | 읍면동별 개별 호출 → 함수당 1회 통합 | DB 호출 40배 감소, 성능 40배 개선 |
+| ROW_NUMBER() _uid | DB 함수 결과에 순차 PK 생성 | rid 중복 시 QGIS 로드 실패 방지 |
+| 공간 인덱스 | clip 전 createSpatialIndex() | clip 속도 10배 향상 |
 | 전처리 | BatchPreprocessTask (순차) | processing.run() 병렬 실행 시 크래시 |
 | DB 함수 호출 | gis_layer_loader와 동일 패턴 | 필터 없이 로드 → 후처리 클리핑 |
 | 다이얼로그 | 상태 유지 + 초기화 버튼 | 닫았다 열어도 작업 유지 |
 | 단계 이동 | 자유 이동 (잠금 없음) | 사용자 편의 |
+| 지장물 폴더 로드 | os.walk() 재귀 탐색, 디렉토리→그룹 | 82개 파일 일괄 처리, 2초 내 완료 |
 
 ---
 
