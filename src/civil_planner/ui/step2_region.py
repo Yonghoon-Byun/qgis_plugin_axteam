@@ -9,11 +9,11 @@ import csv
 from pathlib import Path
 
 from qgis.PyQt.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QComboBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QComboBox, QPushButton,
 )
 from qgis.PyQt.QtCore import Qt
 
-from .styles import CARD_STYLE
+from .styles import CARD_STYLE, PRIMARY_BUTTON_STYLE
 
 
 class Step2Region(QWidget):
@@ -48,8 +48,8 @@ class Step2Region(QWidget):
         # 안내
         guide = QLabel(
             "사업 대상 지역을 선택합니다.\n"
-            "시도 → 시군구 → 읍면동 순서로 선택하면\n"
-            "지도가 해당 지역으로 이동하고, 이후 데이터 로드에 활용됩니다."
+            "시도 → 시군구 → 읍면동 순서로 선택한 후\n"
+            "확인 버튼을 누르면 지도가 해당 지역으로 이동합니다."
         )
         guide.setStyleSheet("font-size: 14px; color: #6b7280; line-height: 1.5;")
         guide.setWordWrap(True)
@@ -109,6 +109,14 @@ class Step2Region(QWidget):
 
         card.setLayout(card_layout)
         layout.addWidget(card)
+
+        # 확인 버튼
+        self.btn_confirm = QPushButton("지역 확인 및 이동")
+        self.btn_confirm.setStyleSheet(PRIMARY_BUTTON_STYLE)
+        self.btn_confirm.setCursor(Qt.PointingHandCursor)
+        self.btn_confirm.setFixedHeight(42)
+        self.btn_confirm.clicked.connect(self._on_confirm)
+        layout.addWidget(self.btn_confirm)
 
         # 상태 표시
         self.status_label = QLabel("지역이 선택되지 않았습니다.")
@@ -181,7 +189,39 @@ class Step2Region(QWidget):
         emd_name = self.combo_emd.currentText()
         self.shared_data["selected_region_name"] = f"{sido_name} {sigungu_name} {emd_name}"
 
-        self._zoom_to_region(emd_code)
+    def _on_confirm(self):
+        """확인 버튼: 선택된 수준(시도/시군구/읍면동)에 따라 지도 이동"""
+        # 가장 세밀한 수준부터 확인
+        emd_code = self.combo_emd.currentData()
+        sigungu_code = self.combo_sigungu.currentData()
+        sido_code = self.combo_sido.currentData()
+
+        if emd_code:
+            target_code = emd_code
+            sido_name = self.combo_sido.currentText()
+            sigungu_name = self.combo_sigungu.currentText()
+            emd_name = self.combo_emd.currentText()
+            self.shared_data["selected_emd_codes"] = [emd_code]
+            self.shared_data["selected_region_name"] = f"{sido_name} {sigungu_name} {emd_name}"
+        elif sigungu_code:
+            target_code = sigungu_code
+            sido_name = self.combo_sido.currentText()
+            sigungu_name = self.combo_sigungu.currentText()
+            self.shared_data["selected_emd_codes"] = []
+            self.shared_data["selected_region_name"] = f"{sido_name} {sigungu_name}"
+        elif sido_code:
+            target_code = sido_code
+            sido_name = self.combo_sido.currentText()
+            self.shared_data["selected_emd_codes"] = []
+            self.shared_data["selected_region_name"] = sido_name
+        else:
+            self.status_label.setText("지역을 선택해주세요.")
+            self.status_label.setStyleSheet(
+                "font-size: 13px; color: #ef4444; padding: 8px; font-weight: 600;"
+            )
+            return
+
+        self._zoom_to_region(target_code)
 
     # ------------------------------------------------------------------
     # 지도 이동 (sgis_hjd 역질의: code → bbox)

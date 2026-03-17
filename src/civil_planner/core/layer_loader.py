@@ -229,6 +229,76 @@ def build_function_uri(function_name, region_code, layer_info=None, extent_5179=
     return uri
 
 
+def build_union_uri(function_name, region_codes, layer_info=None, extent_5179=None):
+    """여러 읍면동 코드를 UNION ALL로 합쳐 하나의 URI 생성
+
+    DB 함수를 읍면동별로 개별 호출하는 대신, UNION ALL로 통합하여
+    1회 쿼리로 모든 데이터를 가져온다. (640회 → 16회로 감소)
+
+    Args:
+        function_name: DB 함수 이름 또는 테이블 이름
+        region_codes: 행정구역 코드 리스트 (예: ["31240101", "31240102"])
+        layer_info: 레이어 추가 정보 (query_type, pk_column 등)
+        extent_5179: QgsRectangle (EPSG:5179 기준 bbox)
+
+    Returns:
+        QgsDataSourceUri
+    """
+    # Validate all region codes
+    for code in region_codes:
+        if not re.match(r'^[0-9]+$', code):
+            raise ValueError(f"Invalid region code: {code}")
+
+    uri = QgsDataSourceUri()
+    uri.setConnection(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+
+    geom_col = DB_GEOM_COLUMN
+    if layer_info and "geom_column" in layer_info:
+        geom_col = layer_info["geom_column"]
+
+    query_type = layer_info.get("query_type", "function") if layer_info else "function"
+    pk_col = layer_info.get("pk_column", "") if layer_info else ""
+
+    if query_type == "spatial":
+        # 테이블 직접 공간쿼리 — extent 기반 (이미 1회 호출)
+        if extent_5179 is not None:
+            xmin = extent_5179.xMinimum()
+            ymin = extent_5179.yMinimum()
+            xmax = extent_5179.xMaximum()
+            ymax = extent_5179.yMaximum()
+            sql_filter = (
+                f"ST_Intersects({geom_col}, "
+                f"ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax}, {DB_SRID}))"
+            )
+        else:
+            # 여러 행정구역 geometry의 union으로 공간 필터
+            code_list = ", ".join(f"'{c}'" for c in region_codes)
+            sql_filter = (
+                f"ST_Intersects({geom_col}, "
+                f"(SELECT ST_Union(geometry) FROM {DB_SCHEMA}.sgis_hjd "
+                f"WHERE adm_cd IN ({code_list})))"
+            )
+        uri.setDataSource(DB_SCHEMA, function_name, geom_col, sql_filter, pk_col)
+    elif query_type == "table":
+        # 테이블 직접 조회 — OR 조건으로 통합
+        if len(region_codes) == 1:
+            sql_filter = f"adm_cd LIKE '{region_codes[0]}%'"
+        else:
+            conditions = [f"adm_cd LIKE '{code}%'" for code in region_codes]
+            sql_filter = f"({' OR '.join(conditions)})"
+        uri.setDataSource(DB_SCHEMA, function_name, geom_col, sql_filter, pk_col)
+    else:
+        # DB 함수 — UNION ALL로 통합
+        subqueries = [
+            f"SELECT * FROM {DB_SCHEMA}.{function_name}('{code}')"
+            for code in region_codes
+        ]
+        table = f"({' UNION ALL '.join(subqueries)})"
+        uri.setDataSource("", table, geom_col, "", pk_col or "rid")
+
+    return uri
+
+
 class LayerLoaderThread(QThread):
     """비동기 레이어 URI 준비 스레드
 
@@ -288,13 +358,9 @@ class LayerLoaderThread(QThread):
                     uri_str = self._build_raster_uri(func)
                     self.uri_ready.emit(uri_str, name, "raster", "gdal")
                 else:
-                    # 읍면동별로 호출 → 소량 데이터 × N회 (빠름)
-                    for code in region_codes:
-                        if self._is_cancelled:
-                            break
-                        uri = build_function_uri(func, code, layer_info, self.extent_5179)
-                        suffix = f"_{code}" if len(region_codes) > 1 else ""
-                        self.uri_ready.emit(uri.uri(), f"{name}{suffix}", "vector", "postgres")
+                    # UNION ALL 통합 쿼리 — 레이어당 1회 호출 (읍면동 N개 통합)
+                    uri = build_union_uri(func, region_codes, layer_info, self.extent_5179)
+                    self.uri_ready.emit(uri.uri(), name, "vector", "postgres")
             except Exception as e:
                 QgsMessageLog.logMessage(
                     f"LayerLoaderThread - {name}: {str(e)}",

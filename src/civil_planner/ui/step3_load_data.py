@@ -217,17 +217,19 @@ class Step3LoadData(QWidget):
 
         # 메인 스레드에서 행정구역 코드 감지 (읍면동 단위 → 빠른 데이터 로드)
 
-        # 1순위: 사전 선택된 읍면동 코드 사용 (Step 2 사업지역 선택에서 선택)
-        region_codes = self.shared_data.get("selected_emd_codes", [])
+        # 작업 범위 기반 행정구역 감지 (항상 extent로 감지 — 범위 내 모든 읍면동 포함)
+        self.status_label.setText("행정구역 감지 중...")
+        region_codes = detect_emd_codes(extent_5179)
 
         if not region_codes:
-            # 2순위: 기존 공간 쿼리 폴백 (사전 선택 없이 진행한 경우)
-            self.status_label.setText("행정구역 자동 감지 중...")
-            region_codes = detect_emd_codes(extent_5179)
-            if not region_codes:
-                code = detect_sigungu_code(extent_5179) or detect_region_code(extent_5179)
-                if code:
-                    region_codes = [code]
+            # 폴백 1: 시군구/시도 코드로 감지
+            code = detect_sigungu_code(extent_5179) or detect_region_code(extent_5179)
+            if code:
+                region_codes = [code]
+
+        if not region_codes:
+            # 폴백 2: 사전 선택된 읍면동 코드 사용 (DB 감지 실패 시)
+            region_codes = self.shared_data.get("selected_emd_codes", [])
 
         if not region_codes:
             QMessageBox.warning(

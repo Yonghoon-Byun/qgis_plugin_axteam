@@ -206,16 +206,15 @@ class BatchPreprocessTask(QgsTask):
                 if result is not None:
                     self.results.append((result, name, True))
                 else:
-                    # 전처리 실패 시 원본 유지
-                    self.results.append((layer, name, False))
+                    # 전처리 실패 시 레이어 제외 (범위 밖 데이터 방지)
                     QgsMessageLog.logMessage(
-                        f"전처리 결과 없음 (원본 유지): {name}",
+                        f"전처리 실패 (레이어 제외): {name}",
                         LOG_TAG, Qgis.Warning,
                     )
             except Exception as e:
-                self.results.append((layer, name, False))
+                # 오류 발생 시 레이어 제외 (범위 밖 데이터 방지)
                 QgsMessageLog.logMessage(
-                    f"전처리 오류 ({name}): {e}",
+                    f"전처리 오류 (레이어 제외): {name} - {e}",
                     LOG_TAG, Qgis.Critical,
                 )
 
