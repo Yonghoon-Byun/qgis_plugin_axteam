@@ -27,6 +27,7 @@ class Step5Obstacle(QWidget):
         self.shared_data = shared_data
         self.style_manager = StyleManager()
         self._file_paths = []
+        self._folder_map = {}  # {folder_name: [shp_paths]}
         self._setup_ui()
 
     def _setup_ui(self):
@@ -36,6 +37,7 @@ class Step5Obstacle(QWidget):
 
         guide = QLabel(
             "발주처로부터 수령한 지장물 데이터(Shapefile)를 불러옵니다.\n"
+            "폴더를 선택하면 하위 폴더별로 그룹이 자동 생성됩니다.\n"
             "작업 범위에 맞게 자동으로 클리핑 및 도형 수정을 수행합니다."
         )
         guide.setStyleSheet("font-size: 14px; color: #6b7280;")
@@ -61,6 +63,12 @@ class Step5Obstacle(QWidget):
         btn_add.setCursor(Qt.PointingHandCursor)
         btn_add.clicked.connect(self._add_files)
         btn_row.addWidget(btn_add)
+
+        btn_add_folder = QPushButton("폴더 추가...")
+        btn_add_folder.setStyleSheet(SECONDARY_BUTTON_STYLE)
+        btn_add_folder.setCursor(Qt.PointingHandCursor)
+        btn_add_folder.clicked.connect(self._add_folder)
+        btn_row.addWidget(btn_add_folder)
 
         btn_clear = QPushButton("목록 초기화")
         btn_clear.setStyleSheet(SECONDARY_BUTTON_STYLE)
@@ -132,14 +140,59 @@ class Step5Obstacle(QWidget):
                 self._file_paths.append(f)
                 self.file_list.addItem(os.path.basename(f))
 
+    def _add_folder(self):
+        """폴더 선택 → 하위 디렉토리별 SHP 파일 자동 탐색"""
+        folder = QFileDialog.getExistingDirectory(
+            self, "지장물 폴더 선택", ""
+        )
+        if not folder:
+            return
+
+        # 하위 디렉토리 스캔
+        found_count = 0
+        for entry in sorted(os.listdir(folder)):
+            subdir = os.path.join(folder, entry)
+            if not os.path.isdir(subdir):
+                continue
+
+            # 서브폴더 내 SHP 파일 수집
+            shp_files = sorted([
+                os.path.join(subdir, f)
+                for f in os.listdir(subdir)
+                if f.lower().endswith(".shp")
+            ])
+            if not shp_files:
+                continue
+
+            folder_name = entry  # 가스, 상수, 하수 등
+            if folder_name not in self._folder_map:
+                self._folder_map[folder_name] = []
+
+            for shp in shp_files:
+                if shp not in self._folder_map[folder_name]:
+                    self._folder_map[folder_name].append(shp)
+                    found_count += 1
+
+            # 리스트 위젯에 표시
+            self.file_list.addItem(f"\U0001f4c1 {folder_name}/ ({len(shp_files)}개 SHP)")
+
+        if found_count == 0:
+            QMessageBox.information(self, "알림", "선택한 폴더에 SHP 파일이 없습니다.")
+        else:
+            self.status_label.setText(f"폴더 추가 완료: {found_count}개 SHP 파일")
+            self.status_label.setStyleSheet(
+                "font-size: 13px; color: #059669; padding: 4px; font-weight: 600;"
+            )
+
     def _clear_files(self):
         self._file_paths.clear()
+        self._folder_map.clear()
         self.file_list.clear()
 
     def _load_obstacles(self):
         """지장물 파일 로드 + 전처리"""
-        if not self._file_paths:
-            QMessageBox.warning(self, "알림", "지장물 파일을 추가해주세요.")
+        if not self._file_paths and not self._folder_map:
+            QMessageBox.warning(self, "알림", "지장물 파일 또는 폴더를 추가해주세요.")
             return
 
         boundary = self.shared_data.get("boundary_layer")
@@ -147,34 +200,31 @@ class Step5Obstacle(QWidget):
             QMessageBox.warning(self, "알림", "작업 범위가 설정되지 않았습니다.")
             return
 
-        # 지장물 그룹 생성
+        # 지장물 루트 그룹 생성
         root = QgsProject.instance().layerTreeRoot()
         obstacle_group = root.findGroup("지장물")
         if obstacle_group is None:
             obstacle_group = root.insertGroup(0, "지장물")
 
         loaded = []
+
+        # 1) 폴더 기반 로드 (서브그룹별)
+        for folder_name, shp_paths in sorted(self._folder_map.items()):
+            # 서브그룹 생성
+            sub_group = obstacle_group.findGroup(folder_name)
+            if sub_group is None:
+                sub_group = obstacle_group.addGroup(folder_name)
+
+            for filepath in shp_paths:
+                result = self._load_single_shp(filepath, boundary, sub_group)
+                if result:
+                    loaded.append(result)
+
+        # 2) 개별 파일 로드 (루트 지장물 그룹에)
         for filepath in self._file_paths:
-            basename = os.path.splitext(os.path.basename(filepath))[0]
-
-            layer = QgsVectorLayer(filepath, basename, "ogr")
-            if not layer.isValid():
-                self.status_label.setText(f"로드 실패: {basename}")
-                self.status_label.setStyleSheet(
-                    "font-size: 13px; color: #ef4444; padding: 4px;"
-                )
-                continue
-
-            # 전처리 (클리핑 + 도형수정)
-            processed = Preprocessor.preprocess_layer(layer, boundary)
-            result_layer = processed if processed is not None else layer
-
-            # 스타일 적용 (파일명 기반 매칭)
-            self.style_manager.apply_style_to_layer(result_layer, basename)
-
-            QgsProject.instance().addMapLayer(result_layer, False)
-            obstacle_group.addLayer(result_layer)
-            loaded.append(result_layer)
+            result = self._load_single_shp(filepath, boundary, obstacle_group)
+            if result:
+                loaded.append(result)
 
         self.shared_data["obstacle_layers"] = loaded
         self.status_label.setText(f"지장물 로드 완료: {len(loaded)}개 레이어")
@@ -182,6 +232,46 @@ class Step5Obstacle(QWidget):
             "font-size: 13px; color: #059669; padding: 4px; font-weight: 600;"
         )
         self.iface.mapCanvas().refresh()
+
+    def _load_single_shp(self, filepath, boundary, target_group):
+        """단일 SHP 파일 로드 + 전처리 + 그룹에 추가
+
+        Args:
+            filepath: SHP 파일 경로
+            boundary: 클리핑 범위 레이어
+            target_group: 추가할 레이어 트리 그룹
+
+        Returns:
+            QgsVectorLayer or None
+        """
+        basename = os.path.splitext(os.path.basename(filepath))[0]
+
+        layer = QgsVectorLayer(filepath, basename, "ogr")
+        if not layer.isValid():
+            self.status_label.setText(f"로드 실패: {basename}")
+            self.status_label.setStyleSheet(
+                "font-size: 13px; color: #ef4444; padding: 4px;"
+            )
+            return None
+
+        # 전처리 (클리핑 + 도형수정)
+        processed = Preprocessor.preprocess_layer(layer, boundary)
+        if processed is None:
+            return None
+
+        # 스타일 적용 (파일명 기반 매칭)
+        self.style_manager.apply_style_to_layer(processed, basename)
+
+        QgsProject.instance().addMapLayer(processed, False)
+        target_group.addLayer(processed)
+        return processed
+
+    def reset(self):
+        """상태 초기화"""
+        self._file_paths.clear()
+        self._folder_map.clear()
+        self.file_list.clear()
+        self.status_label.setText("")
 
     def on_enter(self):
         pass
