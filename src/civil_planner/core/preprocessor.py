@@ -34,6 +34,8 @@ class Preprocessor:
         name = output_name or f"{input_layer.name()}_clip"
 
         try:
+            # 입력 레이어에 공간 인덱스 생성 (clip 속도 향상)
+            input_layer.dataProvider().createSpatialIndex()
             import processing
             result = processing.run(
                 "native:clip",
