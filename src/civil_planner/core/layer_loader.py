@@ -221,10 +221,12 @@ def build_function_uri(function_name, region_code, layer_info=None, extent_5179=
         sql_filter = f"adm_cd LIKE '{region_code}%'"
         uri.setDataSource(DB_SCHEMA, function_name, geom_col, sql_filter, pk_col)
     else:
-        # DB 함수 서브쿼리 방식 (gis_layer_loader와 동일)
-        # 필터 없이 로드 → PreprocessTask에서 클리핑
-        table = f"(SELECT * FROM {DB_SCHEMA}.{function_name}('{region_code}'))"
-        uri.setDataSource("", table, geom_col, "", pk_col or "rid")
+        # DB 함수 서브쿼리 방식 — ROW_NUMBER()로 고유 PK 생성
+        table = (
+            f"(SELECT ROW_NUMBER() OVER() AS _uid, t.* "
+            f"FROM {DB_SCHEMA}.{function_name}('{region_code}') AS t)"
+        )
+        uri.setDataSource("", table, geom_col, "", pk_col or "_uid")
 
     return uri
 
@@ -288,13 +290,14 @@ def build_union_uri(function_name, region_codes, layer_info=None, extent_5179=No
             sql_filter = f"({' OR '.join(conditions)})"
         uri.setDataSource(DB_SCHEMA, function_name, geom_col, sql_filter, pk_col)
     else:
-        # DB 함수 — UNION ALL로 통합
+        # DB 함수 — UNION ALL로 통합 + ROW_NUMBER()로 고유 PK 생성
         subqueries = [
             f"SELECT * FROM {DB_SCHEMA}.{function_name}('{code}')"
             for code in region_codes
         ]
-        table = f"({' UNION ALL '.join(subqueries)})"
-        uri.setDataSource("", table, geom_col, "", pk_col or "rid")
+        inner = ' UNION ALL '.join(subqueries)
+        table = f"(SELECT ROW_NUMBER() OVER() AS _uid, t.* FROM ({inner}) AS t)"
+        uri.setDataSource("", table, geom_col, "", pk_col or "_uid")
 
     return uri
 

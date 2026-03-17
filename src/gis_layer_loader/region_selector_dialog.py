@@ -359,10 +359,12 @@ class DBLayerLoaderThread(QThread):
         if self.extra_params.get("display_level"):
             sql = f"(SELECT * FROM {self.db_config['schema']}.{self.function_name}('{self.region_code}', '{self.extra_params['display_level']}'))"
         else:
-            sql = f"(SELECT * FROM {self.db_config['schema']}.{self.function_name}('{self.region_code}'))"
+            sql = (
+                f"(SELECT ROW_NUMBER() OVER() AS _uid, t.* "
+                f"FROM {self.db_config['schema']}.{self.function_name}('{self.region_code}') AS t)"
+            )
 
-        pk_col = "rid"
-        uri.setDataSource("", sql, self.db_config["geom_column"], "", pk_col)
+        uri.setDataSource("", sql, self.db_config["geom_column"], "", "_uid")
 
         # # Log connection URI (without password)
         # safe_uri = uri.uri().replace(
