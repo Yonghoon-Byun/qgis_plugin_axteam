@@ -198,6 +198,42 @@ src/civil_planner/
 
 ---
 
+## DB 좌표계 현황 (EPSG:5179)
+
+> **현재 DB 전체가 EPSG:5179로 저장**되어 있으며, 프로젝트 CRS(5186)와는 QGIS OTF로 자동 변환한다.
+> 5179 ↔ 5186은 동일 datum(Korea 2000)이므로 변환 오차 없음 (부동소수점 정밀도 수준).
+
+### DB SRID 분포
+
+| SRID | 테이블 수 | 비고 |
+|------|----------|------|
+| 5179 | ~40개+ | sgis_hjd, lsmd_cont_ldreg, contour, n3a_*, mv_hjd_*, mv_road_37~39 등 |
+| 0 (미설정) | ~25개 | mv_contour_11~36, mv_road_11~36 등 (원본 좌표계 확인 필요) |
+| 5186 | 2개 | land_cover_yangju, soil |
+
+### DB 함수 내 5179 하드코딩
+
+모든 DB 함수(14개)의 결과 geometry에 `::geometry(MultiPolygon, 5179)` 형태로 SRID가 캐스팅되어 있음.
+→ DB를 5186으로 변환하려면 함수 소스도 수정 필요.
+
+### 플러그인별 5179 참조 현황
+
+| 플러그인 | 5179 참조 위치 | 변환 시 수정 범위 |
+|---------|---------------|-----------------|
+| **civil_planner** | `DB_SRID = 5179`, transform_extent_to_db() | DB_SRID 변경 + transform 코드 정리 |
+| **gis_layer_loader** | 없음 (DB 함수 결과를 OTF로 사용) | 영향 적음 |
+| **gis_stats** | 없음 | 영향 없음 |
+| **reservoir_site_analyzer** | `ST_MakeEnvelope(..., 5179)` 1곳, `crs=EPSG:5179` 2곳 | 하드코딩 3곳 수정 |
+| **BasePlan_opt** | 프로젝트 CRS, WMS srsname, export bbox 등 **10곳+** | 전면 수정 (가장 큰 작업) |
+
+### 5186 변환 판단 (미결정)
+
+- **장점**: 프로젝트 CRS와 DB CRS 통일, transform 코드 제거 가능
+- **단점**: DB 함수 14개 + 테이블 ~40개 수정, BasePlan_opt 전면 수정 필요
+- **현행 유지 사유**: OTF 변환으로 실사용 문제 없음, 변환 리스크 대비 이점이 크지 않음
+
+---
+
 ## 공통 기술 스택
 - Python 3.12+ (QGIS 3.40 내장)
 - PyQt5 (qgis.PyQt)
